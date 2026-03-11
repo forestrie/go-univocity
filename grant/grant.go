@@ -2,10 +2,7 @@
 // univocity Solidity (LibLogState._leafCommitment) and canopy grant format.
 package grant
 
-import (
-	"crypto/sha256"
-	"encoding/binary"
-)
+import "errors"
 
 // Sizes for leaf commitment (align with univocity and canopy).
 const (
@@ -13,47 +10,39 @@ const (
 	LogIDBytes       = 16
 	GrantFlagsBytes  = 8
 	BoundsBytes      = 8 // maxHeight, minGrowth as uint64
+
+	// Inner preimage sizes matching Solidity PublishGrant (abi.encodePacked).
+	// logId and ownerLogId are bytes32 (32 bytes); 16-byte UUIDs are left-padded to 32.
+	// grant is uint256 (32 bytes); 8-byte flags in low 8 bytes, high 24 zero.
+	InnerLogIDBytes      = 32
+	InnerGrantBytes      = 32
+	InnerOwnerLogIDBytes = 32
 )
 
-// LeafCommitment computes the authority log leaf hash as in univocity:
-//
-//	leafCommitment = sha256(grantIDTimestampBe || sha256(logId || grant || maxHeight || minGrowth || ownerLogId || grantData))
-//
-// All multi-byte numeric fields are big-endian. Variable-length fields (logId, ownerLogId, grantData) are
-// concatenated without length prefix (abi.encodePacked style).
-func LeafCommitment(
-	grantIDTimestampBe [IDTimestampBytes]byte,
-	logId []byte,
-	grantFlags []byte,
-	maxHeight, minGrowth uint64,
-	ownerLogId []byte,
-	grantData []byte,
-) [32]byte {
-	inner := sha256.Sum256(concat(
-		logId,
-		grantFlags,
-		u64BE(maxHeight),
-		u64BE(minGrowth),
-		ownerLogId,
-		grantData,
-	))
-	return sha256.Sum256(concat(grantIDTimestampBe[:], inner[:]))
-}
+// ErrGrantFieldSize is returned by CheckSizes when a variable-length parameter
+// exceeds its fixed maximum. Callers can use errors.Is(err, ErrGrantFieldSize)
+// to detect this class of error.
+var ErrGrantFieldSize = errors.New("grant field size exceeds limit")
 
-func concat(chunks ...[]byte) []byte {
-	var n int
-	for _, c := range chunks {
-		n += len(c)
-	}
-	out := make([]byte, 0, n)
-	for _, c := range chunks {
-		out = append(out, c...)
-	}
-	return out
-}
-
-func u64BE(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
+// Grant holds the fields for a PublishGrant + idtimestamp, aligned with
+// univocity and canopy. Used for encoding/decoding and for leaf commitment inputs.
+type Grant struct {
+	// IDTimestamp is the 8-byte big-endian unique grant timestamp (idtimestamp).
+	IDTimestamp [IDTimestampBytes]byte
+	// LogId is the target log (16 bytes, UUID).
+	LogId []byte
+	// OwnerLogId is the authority log that owns this grant (16 bytes).
+	OwnerLogId []byte
+	// GrantFlags is the 8-byte flags bitmap.
+	GrantFlags []byte
+	// MaxHeight is the optional max size bound (0 = no limit).
+	MaxHeight uint64
+	// MinGrowth is the minimum growth per checkpoint.
+	MinGrowth uint64
+	// GrantData is opaque (e.g. signer key for first checkpoint).
+	GrantData []byte
+	// Signer is the key id / signer binding (canopy; not in leaf commitment).
+	Signer []byte
+	// Kind is the 1-byte grant kind (canopy; not in univocity leaf).
+	Kind byte
 }
