@@ -2,7 +2,11 @@ package grant
 
 import (
 	"bytes"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -296,5 +300,66 @@ func TestMarshalGrant_LeafCommitmentPreserved(t *testing.T) {
 	leafAfter := LeafCommitmentFromGrant(&dec)
 	if leafBefore != leafAfter {
 		t.Error("leaf commitment must be preserved across MarshalGrant/UnmarshalGrant round-trip")
+	}
+}
+
+// grantVector is one entry from tests/fixtures/grant_vectors.json (from gen_testvectors.py).
+type grantVector struct {
+	Description     string `json:"description"`
+	IDTimestampHex  string `json:"idtimestamp_hex"`
+	LogIDHex        string `json:"log_id_hex"`
+	OwnerLogIDHex   string `json:"owner_log_id_hex"`
+	GrantFlagsHex   string `json:"grant_flags_hex"`
+	MaxHeight       uint64 `json:"max_height"`
+	MinGrowth       uint64 `json:"min_growth"`
+	GrantDataHex    string `json:"grant_data_hex"`
+	SignerHex       string `json:"signer_hex"`
+	Kind            byte   `json:"kind"`
+	ExpectedCBORHex string `json:"expected_cbor_hex"`
+}
+
+// TestGrantVectorsFromFixture loads tests/fixtures/grant_vectors.json and
+// asserts decode(golden_cbor) round-trips and re-encode equals golden bytes.
+func TestGrantVectorsFromFixture(t *testing.T) {
+	candidates := []string{
+		filepath.Join("tests", "fixtures", "grant_vectors.json"),
+		filepath.Join("..", "tests", "fixtures", "grant_vectors.json"),
+	}
+	var data []byte
+	var err error
+	for _, path := range candidates {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+	}
+	if data == nil {
+		t.Skipf("fixture not found (run tests/scripts/gen_testvectors.py): %v", err)
+		return
+	}
+	var vectors []grantVector
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	for i, v := range vectors {
+		t.Run(v.Description, func(t *testing.T) {
+			cborBytes, err := hex.DecodeString(v.ExpectedCBORHex)
+			if err != nil {
+				t.Fatalf("vector %d: invalid expected_cbor_hex: %v", i, err)
+			}
+			var dec Grant
+			if err := UnmarshalGrant(cborBytes, &dec); err != nil {
+				t.Fatalf("vector %d: UnmarshalGrant: %v", i, err)
+			}
+			reencoded, err := MarshalGrant(&dec)
+			if err != nil {
+				t.Fatalf("vector %d: MarshalGrant: %v", i, err)
+			}
+			if !bytes.Equal(reencoded, cborBytes) {
+				t.Errorf("vector %d: re-encode != golden CBOR (decode then encode must be byte-identical)", i)
+				t.Logf("got  %s", hex.EncodeToString(reencoded))
+				t.Logf("want %s", v.ExpectedCBORHex)
+			}
+		})
 	}
 }
