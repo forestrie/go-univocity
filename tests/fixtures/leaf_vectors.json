@@ -8,7 +8,7 @@
     "min_growth": 1,
     "owner_log_id_hex": "101112131415161718191a1b1c1d1e1f",
     "grant_data_hex": "abcd",
-    "expected_leaf_hex": "46a83eb09f26cf6f9c202727f0b76e3c3b67cc12c0f14b230eb2fc73c0d793f3"
+    "expected_leaf_hex": "0bc4a0d26f57d59ca4dc604865be4c49a6221f1cbe65840e95e9905d02b30ea0"
   },
   {
     "description": "alternate idtimestamp and bounds",
@@ -19,7 +19,7 @@
     "min_growth": 2,
     "owner_log_id_hex": "08090a0b0c0d0e0f1011121314151617",
     "grant_data_hex": "dead",
-    "expected_leaf_hex": "e80b8616fa9bcdcc376aed3f5e28fba1c2d922e15787c6e274eda0403a1a3b43"
+    "expected_leaf_hex": "24538d559f22c03b43ba4687f92ddb1cb3ad32ad761aaef2515326bd1223d230"
   },
   {
     "description": "empty grant_data, zero bounds",
@@ -30,6 +30,6 @@
     "min_growth": 0,
     "owner_log_id_hex": "101112131415161718191a1b1c1d1e1f",
     "grant_data_hex": "",
-    "expected_leaf_hex": "24b564a043a08b90d5094d2c8834028609718ecf9369afbcf6839241d03f8e2b"
+    "expected_leaf_hex": "d69fd78ccf571d067a3f15bc3a1c81d070114c7f7a7e1460ade244d31ac357f6"
   }
 ]

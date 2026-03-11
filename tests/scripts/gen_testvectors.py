@@ -5,8 +5,9 @@ Generate test vectors for leaf commitment and grant encoding.
 Output: tests/fixtures/leaf_vectors.json (and optionally grant_vectors.json)
 Consumable by Go, TypeScript, and Python tests.
 
-Formula (univocity): leaf = sha256(grantIDTimestampBe || sha256(logId || grant || maxHeight || minGrowth || ownerLogId || grantData))
-All multi-byte integers are big-endian. No length prefixes (abi.encodePacked style).
+Formula (univocity, Solidity PublishGrant): inner = logId(32) || grant(32) || maxHeight(8) || minGrowth(8) || ownerLogId(32) || grantData.
+leaf = sha256(grantIDTimestampBe || sha256(inner)).
+Padding: logId and ownerLogId (16 bytes) left-padded to 32; grantFlags (8 bytes) in low 8 of 32-byte grant.
 """
 
 import hashlib
@@ -14,9 +15,30 @@ import json
 import os
 import sys
 
+INNER_LOG_ID_BYTES = 32
+INNER_GRANT_BYTES = 32
+INNER_OWNER_LOG_ID_BYTES = 32
+
 
 def u64_be(n: int) -> bytes:
     return n.to_bytes(8, "big")
+
+
+def pad_left(b: bytes, limit: int) -> bytes:
+    """Left-pad to limit bytes (leading zeros). If len(b) >= limit, return b or b[:limit]."""
+    if len(b) >= limit:
+        return b[:limit] if len(b) > limit else b
+    return b"\x00" * (limit - len(b)) + b
+
+
+def pad_grant32(flags: bytes) -> bytes:
+    """8-byte flags in low 8 bytes of 32-byte slice (high 24 zero)."""
+    out = bytearray(32)
+    if len(flags) >= 8:
+        out[24:32] = flags[-8:]
+    elif len(flags) > 0:
+        out[32 - len(flags) : 32] = flags
+    return bytes(out)
 
 
 def leaf_commitment(
@@ -29,11 +51,11 @@ def leaf_commitment(
     grant_data: bytes,
 ) -> bytes:
     inner = (
-        log_id
-        + grant_flags
+        pad_left(log_id, INNER_LOG_ID_BYTES)
+        + pad_grant32(grant_flags)
         + u64_be(max_height)
         + u64_be(min_growth)
-        + owner_log_id
+        + pad_left(owner_log_id, INNER_OWNER_LOG_ID_BYTES)
         + grant_data
     )
     inner_hash = hashlib.sha256(inner).digest()
