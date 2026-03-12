@@ -68,15 +68,15 @@ func TestLeafCommitmentFromGrant(t *testing.T) {
 
 // leafVector is one entry from tests/fixtures/leaf_vectors.json (from gen_testvectors.py).
 type leafVector struct {
-	IDTimestampHex     string `json:"idtimestamp_hex"`
-	LogIDHex           string `json:"log_id_hex"`
-	GrantFlagsHex      string `json:"grant_flags_hex"`
-	MaxHeight          uint64 `json:"max_height"`
-	MinGrowth          uint64 `json:"min_growth"`
-	OwnerLogIDHex      string `json:"owner_log_id_hex"`
-	GrantDataHex       string `json:"grant_data_hex"`
-	ExpectedInnerHex   string `json:"expected_inner_hex"`
-	ExpectedLeafHex    string `json:"expected_leaf_hex"`
+	IDTimestampHex   string `json:"idtimestamp_hex"`
+	LogIDHex         string `json:"log_id_hex"`
+	GrantFlagsHex    string `json:"grant_flags_hex"`
+	MaxHeight        uint64 `json:"max_height"`
+	MinGrowth        uint64 `json:"min_growth"`
+	OwnerLogIDHex    string `json:"owner_log_id_hex"`
+	GrantDataHex     string `json:"grant_data_hex"`
+	ExpectedInnerHex string `json:"expected_inner_hex"`
+	ExpectedLeafHex  string `json:"expected_leaf_hex"`
 }
 
 // TestLeafCommitmentFromFixture loads tests/fixtures/leaf_vectors.json if present
