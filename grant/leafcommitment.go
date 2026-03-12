@@ -24,6 +24,40 @@ func CheckSizes(logId, grantFlags, ownerLogId []byte) error {
 	return nil
 }
 
+// InnerHash returns the 32-byte SHA-256 of the inner preimage (logId(32)||grant(32)||maxHeight(8)||minGrowth(8)||ownerLogId(32)||grantData).
+// This is the value used as ContentHash when enqueueing a grant for sequencing (Plan 0004 subplan 03): ranger
+// computes leafHash = H(idTimestampBE || ContentHash), so ContentHash must be the inner hash.
+// Call CheckSizes before InnerHash if you need to reject oversized inputs.
+func InnerHash(
+	logId []byte,
+	grantFlags []byte,
+	maxHeight, minGrowth uint64,
+	ownerLogId []byte,
+	grantData []byte,
+) [32]byte {
+	return sha256.Sum256(concat(
+		padLeft(logId, InnerLogIDBytes),
+		padGrant32(grantFlags),
+		u64BE(maxHeight),
+		u64BE(minGrowth),
+		padLeft(ownerLogId, InnerOwnerLogIDBytes),
+		grantData,
+	))
+}
+
+// InnerHashFromGrant returns the inner hash for a Grant (the ContentHash for grant-sequencing).
+// Uses only the fields that are part of the univocity leaf inner preimage (idtimestamp is not included).
+func InnerHashFromGrant(g *Grant) [32]byte {
+	return InnerHash(
+		g.LogId,
+		g.GrantFlags,
+		g.MaxHeight,
+		g.MinGrowth,
+		g.OwnerLogId,
+		g.GrantData,
+	)
+}
+
 // LeafCommitment computes the authority log leaf hash as in univocity:
 //
 //	leafCommitment = sha256(grantIDTimestampBe || sha256(inner))
@@ -41,14 +75,7 @@ func LeafCommitment(
 	ownerLogId []byte,
 	grantData []byte,
 ) [32]byte {
-	inner := sha256.Sum256(concat(
-		padLeft(logId, InnerLogIDBytes),
-		padGrant32(grantFlags),
-		u64BE(maxHeight),
-		u64BE(minGrowth),
-		padLeft(ownerLogId, InnerOwnerLogIDBytes),
-		grantData,
-	))
+	inner := InnerHash(logId, grantFlags, maxHeight, minGrowth, ownerLogId, grantData)
 	return sha256.Sum256(concat(grantIDTimestampBe[:], inner[:]))
 }
 

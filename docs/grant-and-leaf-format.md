@@ -27,6 +27,8 @@ Fixed-length fields match Solidity `PublishGrant` and `abi.encodePacked`: **logI
 
 Concatenation is **without length prefixes** (Solidity `abi.encodePacked` style). Left-padding is used so that the original bytes occupy the least-significant (right) positions, consistent with big-endian layout for fixed-size fields. The **request** (GC_AUTH_LOG / GC_DATA_LOG) is **not** in the leaf; it is supplied at `publishCheckpoint` time.
 
+**Grant-sequencing (Plan 0004 subplan 03).** When enqueueing a grant for sequencing, the value used as **ContentHash** (fed to the DO and to ranger) is the **inner hash** = `sha256(inner preimage)`. Idtimestamp is **not** included; ranger assigns it and computes `leafHash = H(idTimestampBE || ContentHash)`. So implementations must expose or compute the 32-byte inner hash for the grant-sequencing path (e.g. go-univocity `InnerHash` / `InnerHashFromGrant`).
+
 ---
 
 ## 2. Grant format (PublishGrant + idtimestamp)
@@ -203,7 +205,7 @@ print(leaf.hex())
 
 ## 4. Test vectors
 
-Run `tests/scripts/gen_testvectors.py` to generate `tests/fixtures/leaf_vectors.json`. Each entry has hex-encoded inputs and `expected_leaf_hex`. All three languages should match these vectors.
+Run `tests/scripts/gen_testvectors.py` to generate `tests/fixtures/leaf_vectors.json`. Each entry has hex-encoded inputs, **expected_inner_hex** (ContentHash for grant-sequencing), and **expected_leaf_hex**. All three languages should match these vectors. Go: `InnerHash` / `InnerHashFromGrant`; see `grant/leaf_test.go` (TestInnerHashFromFixture, TestLeafCommitmentFromFixture).
 
 Example (vector 1):
 
@@ -213,6 +215,7 @@ Example (vector 1):
 - max_height: 1000, min_growth: 1
 - owner_log_id_hex: `101112131415161718191a1b1c1d1e1f`
 - grant_data_hex: `abcd`
+- expected_inner_hex: 32-byte inner hash (hex); use as ContentHash for grant-sequencing.
 - expected_leaf_hex: `0bc4a0d26f57d59ca4dc604865be4c49a6221f1cbe65840e95e9905d02b30ea0`
 
 ---

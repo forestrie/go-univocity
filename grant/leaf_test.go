@@ -68,14 +68,15 @@ func TestLeafCommitmentFromGrant(t *testing.T) {
 
 // leafVector is one entry from tests/fixtures/leaf_vectors.json (from gen_testvectors.py).
 type leafVector struct {
-	IDTimestampHex  string `json:"idtimestamp_hex"`
-	LogIDHex        string `json:"log_id_hex"`
-	GrantFlagsHex   string `json:"grant_flags_hex"`
-	MaxHeight       uint64 `json:"max_height"`
-	MinGrowth       uint64 `json:"min_growth"`
-	OwnerLogIDHex   string `json:"owner_log_id_hex"`
-	GrantDataHex    string `json:"grant_data_hex"`
-	ExpectedLeafHex string `json:"expected_leaf_hex"`
+	IDTimestampHex     string `json:"idtimestamp_hex"`
+	LogIDHex           string `json:"log_id_hex"`
+	GrantFlagsHex      string `json:"grant_flags_hex"`
+	MaxHeight          uint64 `json:"max_height"`
+	MinGrowth          uint64 `json:"min_growth"`
+	OwnerLogIDHex      string `json:"owner_log_id_hex"`
+	GrantDataHex       string `json:"grant_data_hex"`
+	ExpectedInnerHex   string `json:"expected_inner_hex"`
+	ExpectedLeafHex    string `json:"expected_leaf_hex"`
 }
 
 // TestLeafCommitmentFromFixture loads tests/fixtures/leaf_vectors.json if present
@@ -110,6 +111,13 @@ func TestLeafCommitmentFromFixture(t *testing.T) {
 		expected, _ := hex.DecodeString(v.ExpectedLeafHex)
 		var idTsArr [IDTimestampBytes]byte
 		copy(idTsArr[:], idTs)
+		// Inner hash (ContentHash for grant-sequencing) must match fixture when present.
+		if v.ExpectedInnerHex != "" {
+			inner := InnerHash(logId, flags, v.MaxHeight, v.MinGrowth, ownerLogId, grantData)
+			if hex.EncodeToString(inner[:]) != v.ExpectedInnerHex {
+				t.Errorf("vector %d: got inner %s, want %s", i, hex.EncodeToString(inner[:]), v.ExpectedInnerHex)
+			}
+		}
 		leaf := LeafCommitment(idTsArr, logId, flags, v.MaxHeight, v.MinGrowth, ownerLogId, grantData)
 		if hex.EncodeToString(leaf[:]) != v.ExpectedLeafHex {
 			t.Errorf("vector %d: got leaf %s, want %s", i, hex.EncodeToString(leaf[:]), v.ExpectedLeafHex)
@@ -121,6 +129,44 @@ func TestLeafCommitmentFromFixture(t *testing.T) {
 					break
 				}
 			}
+		}
+	}
+}
+
+// TestInnerHashFromFixture loads tests/fixtures/leaf_vectors.json and checks that
+// InnerHash matches expected_inner_hex for each vector (ContentHash for grant-sequencing).
+func TestInnerHashFromFixture(t *testing.T) {
+	candidates := []string{
+		filepath.Join("tests", "fixtures", "leaf_vectors.json"),
+		filepath.Join("..", "tests", "fixtures", "leaf_vectors.json"),
+	}
+	var data []byte
+	var err error
+	for _, path := range candidates {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+	}
+	if data == nil {
+		t.Skipf("fixture not found (run gen_testvectors.py): %v", err)
+		return
+	}
+	var vectors []leafVector
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	for i, v := range vectors {
+		if v.ExpectedInnerHex == "" {
+			continue
+		}
+		logId, _ := hex.DecodeString(v.LogIDHex)
+		flags, _ := hex.DecodeString(v.GrantFlagsHex)
+		ownerLogId, _ := hex.DecodeString(v.OwnerLogIDHex)
+		grantData, _ := hex.DecodeString(v.GrantDataHex)
+		inner := InnerHash(logId, flags, v.MaxHeight, v.MinGrowth, ownerLogId, grantData)
+		if hex.EncodeToString(inner[:]) != v.ExpectedInnerHex {
+			t.Errorf("vector %d: got inner %s, want %s", i, hex.EncodeToString(inner[:]), v.ExpectedInnerHex)
 		}
 	}
 }

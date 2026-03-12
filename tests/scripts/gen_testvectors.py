@@ -48,6 +48,26 @@ def pad_grant32(flags: bytes) -> bytes:
     return bytes(out)
 
 
+def inner_hash(
+    log_id: bytes,
+    grant_flags: bytes,
+    max_height: int,
+    min_growth: int,
+    owner_log_id: bytes,
+    grant_data: bytes,
+) -> bytes:
+    """Inner hash = sha256(inner preimage). This is the ContentHash for grant-sequencing (Plan 0004 subplan 03)."""
+    inner = (
+        pad_left(log_id, INNER_LOG_ID_BYTES)
+        + pad_grant32(grant_flags)
+        + u64_be(max_height)
+        + u64_be(min_growth)
+        + pad_left(owner_log_id, INNER_OWNER_LOG_ID_BYTES)
+        + grant_data
+    )
+    return hashlib.sha256(inner).digest()
+
+
 def leaf_commitment(
     grant_id_timestamp_be: bytes,
     log_id: bytes,
@@ -57,16 +77,10 @@ def leaf_commitment(
     owner_log_id: bytes,
     grant_data: bytes,
 ) -> bytes:
-    inner = (
-        pad_left(log_id, INNER_LOG_ID_BYTES)
-        + pad_grant32(grant_flags)
-        + u64_be(max_height)
-        + u64_be(min_growth)
-        + pad_left(owner_log_id, INNER_OWNER_LOG_ID_BYTES)
-        + grant_data
+    inner_hash_bytes = inner_hash(
+        log_id, grant_flags, max_height, min_growth, owner_log_id, grant_data
     )
-    inner_hash = hashlib.sha256(inner).digest()
-    outer = grant_id_timestamp_be + inner_hash
+    outer = grant_id_timestamp_be + inner_hash_bytes
     return hashlib.sha256(outer).digest()
 
 
@@ -172,6 +186,7 @@ def main() -> int:
     grant_flags = bytes(7) + b"\x01"
     owner_log_id = bytes(range(16, 32))
     grant_data = bytes([0xAB, 0xCD])
+    inner_h = inner_hash(log_id, grant_flags, 1000, 1, owner_log_id, grant_data)
     leaf = leaf_commitment(id_ts, log_id, grant_flags, 1000, 1, owner_log_id, grant_data)
     vectors.append(
         {
@@ -183,6 +198,7 @@ def main() -> int:
             "min_growth": 1,
             "owner_log_id_hex": owner_log_id.hex(),
             "grant_data_hex": grant_data.hex(),
+            "expected_inner_hex": inner_h.hex(),
             "expected_leaf_hex": leaf.hex(),
         }
     )
@@ -192,6 +208,7 @@ def main() -> int:
     log_id2 = bytes(range(1, 17))
     owner_log_id2 = bytes(range(8, 24))
     grant_data2 = bytes([0xDE, 0xAD])
+    inner_h2 = inner_hash(log_id2, grant_flags, 2000, 2, owner_log_id2, grant_data2)
     leaf2 = leaf_commitment(
         id_ts2, log_id2, grant_flags, 2000, 2, owner_log_id2, grant_data2
     )
@@ -205,12 +222,14 @@ def main() -> int:
             "min_growth": 2,
             "owner_log_id_hex": owner_log_id2.hex(),
             "grant_data_hex": grant_data2.hex(),
+            "expected_inner_hex": inner_h2.hex(),
             "expected_leaf_hex": leaf2.hex(),
         }
     )
 
     # Vector 3: empty grant_data
     id_ts3 = bytes(7) + b"\x03"
+    inner_h3 = inner_hash(log_id, grant_flags, 0, 0, owner_log_id, b"")
     leaf3 = leaf_commitment(
         id_ts3, log_id, grant_flags, 0, 0, owner_log_id, b""
     )
@@ -224,6 +243,7 @@ def main() -> int:
             "min_growth": 0,
             "owner_log_id_hex": owner_log_id.hex(),
             "grant_data_hex": "",
+            "expected_inner_hex": inner_h3.hex(),
             "expected_leaf_hex": leaf3.hex(),
         }
     )

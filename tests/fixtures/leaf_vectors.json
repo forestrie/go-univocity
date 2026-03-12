@@ -8,6 +8,7 @@
     "min_growth": 1,
     "owner_log_id_hex": "101112131415161718191a1b1c1d1e1f",
     "grant_data_hex": "abcd",
+    "expected_inner_hex": "37ba4d6d92cfac9b673379005bc24f5fd2acf08e8920782ed37c782d69aea553",
     "expected_leaf_hex": "0bc4a0d26f57d59ca4dc604865be4c49a6221f1cbe65840e95e9905d02b30ea0"
   },
   {
@@ -19,6 +20,7 @@
     "min_growth": 2,
     "owner_log_id_hex": "08090a0b0c0d0e0f1011121314151617",
     "grant_data_hex": "dead",
+    "expected_inner_hex": "c2c6f3ceccba03fad9a07eb55d38de7d4cb8ddc0c9f66dd50927858203529fbe",
     "expected_leaf_hex": "24538d559f22c03b43ba4687f92ddb1cb3ad32ad761aaef2515326bd1223d230"
   },
   {
@@ -30,6 +32,7 @@
     "min_growth": 0,
     "owner_log_id_hex": "101112131415161718191a1b1c1d1e1f",
     "grant_data_hex": "",
+    "expected_inner_hex": "9d7d65941e783aede742d64934bdcf66894c02c97af1405d8006c726402d0682",
     "expected_leaf_hex": "d69fd78ccf571d067a3f15bc3a1c81d070114c7f7a7e1460ade244d31ac357f6"
   }
 ]
