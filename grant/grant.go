@@ -24,6 +24,13 @@ const (
 // to detect this class of error.
 var ErrGrantFieldSize = errors.New("grant field size exceeds limit")
 
+// ErrGrantObsoleteKey is returned by UnmarshalGrant when the map carries CBOR
+// key 7 (the retired signer field) or key 8 (the retired kind field). The
+// grant wire format is keys 0-6; grantData is the sole signer binding, and a
+// decoder that accepted the retired keys would reintroduce the ambiguity
+// their removal eliminated. Callers can use errors.Is(err, ErrGrantObsoleteKey).
+var ErrGrantObsoleteKey = errors.New("grant carries an obsolete CBOR key (7 signer or 8 kind)")
+
 // Grant holds the fields for a PublishGrant + idtimestamp, aligned with
 // univocity and canopy. Used for encoding/decoding and for leaf commitment inputs.
 type Grant struct {
@@ -39,10 +46,7 @@ type Grant struct {
 	MaxHeight uint64
 	// MinGrowth is the minimum growth per checkpoint.
 	MinGrowth uint64
-	// GrantData is opaque (e.g. signer key for first checkpoint).
+	// GrantData is opaque (e.g. signer key for first checkpoint). It is the
+	// sole statement-signer binding; there is no separate signer or kind field.
 	GrantData []byte
-	// Signer is the key id / signer binding (canopy; not in leaf commitment).
-	Signer []byte
-	// Kind is the 1-byte grant kind (canopy; not in univocity leaf).
-	Kind byte
 }

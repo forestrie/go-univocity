@@ -1,6 +1,12 @@
 // Package grant: hand-written CBOR codec for the grant wire format. No
-// external CBOR dependency. Map with integer keys 0–8, Core Deterministic
+// external CBOR dependency. Map with integer keys 0–6, Core Deterministic
 // (keys in order; preferred serialization for lengths and integers).
+//
+// Two forms share the keys. The payload form (keys 1–6) is what the owner
+// signs and what the commitment covers. The response form (keys 0–6) is the
+// payload form with the assigned idtimestamp at key 0. The normative
+// definition is forestrie/protocol, spec/log-authority-and-grants.md §2.1;
+// the conformance vectors are that repository's vectors/fixtures/.
 package grant
 
 import (
@@ -9,7 +15,8 @@ import (
 )
 
 // CBOR map key assignments for the grant wire format. Other implementations
-// must use the same keys for interoperability.
+// must use the same keys for interoperability. Keys 7 (signer) and 8 (kind)
+// are retired and rejected on decode; see ErrGrantObsoleteKey.
 const (
 	CborKeyIDTimestamp = 0
 	CborKeyLogId       = 1
@@ -18,8 +25,15 @@ const (
 	CborKeyMaxHeight   = 4
 	CborKeyMinGrowth   = 5
 	CborKeyGrantData   = 6
-	CborKeySigner      = 7
-	CborKeyKind        = 8
+
+	cborKeyObsoleteSigner = 7
+	cborKeyObsoleteKind   = 8
+)
+
+// Map sizes of the two wire forms.
+const (
+	cborResponseMapPairs = 7 // keys 0–6
+	cborPayloadMapPairs  = 6 // keys 1–6
 )
 
 // CBOR initial bytes for byte-string length (major type 2, additional = length).
@@ -41,32 +55,48 @@ const (
 // 32-byte bstr encoding: first byte 0x58 (major 2, additional 24), then byte(32).
 const CborBstrLen32Lead = 0x58 // lead byte for "bstr length in next byte"; next byte is CborFixedLogIdOwnerLogIdLen
 
-// Max lengths for variable-length CBOR fields (GrantData, Signer). Decode
-// rejects larger values for safety.
+// Max length for the variable-length GrantData field. Decode rejects larger
+// values for safety.
 const (
 	CborMaxGrantData = 64 * 1024 // 64 KiB
-	CborMaxSigner    = 1024      // 1 KiB
 )
 
-// MarshalGrant encodes g to CBOR: one map with keys 0–8 in order, Core
-// Deterministic. LogId, OwnerLogId, and GrantFlags have fixed wire lengths
-// (CborFixedLogIdOwnerLogIdLen, CborFixedGrantFlagsLen); we left-pad to
-// those lengths on encode so decode always yields the same size and
-// LeafCommitment pad paths are no-ops. GrantData and Signer are
-// variable-length. Returns ErrGrantFieldSize if logId, grantFlags, or
-// ownerLogId exceed their max (CheckSizes).
+// MarshalGrant encodes g in the response form: one map with keys 0–6 in
+// order, Core Deterministic, key 0 the idtimestamp. LogId, OwnerLogId, and
+// GrantFlags have fixed wire lengths (CborFixedLogIdOwnerLogIdLen,
+// CborFixedGrantFlagsLen); we left-pad to those lengths on encode so decode
+// always yields the same size and LeafCommitment pad paths are no-ops.
+// GrantData is variable-length. Returns ErrGrantFieldSize if logId,
+// grantFlags, or ownerLogId exceed their max (CheckSizes).
 func MarshalGrant(g *Grant) ([]byte, error) {
 	if g == nil {
 		return nil, fmt.Errorf("grant: MarshalGrant: nil grant")
 	}
-	if err := CheckSizes(g.LogId, g.GrantFlags, g.OwnerLogId); err != nil {
-		return nil, err
-	}
 	b := make([]byte, 0, 64)
-	b = append(b, 0xa9)
+	b = append(b, 0xa0|cborResponseMapPairs)
 	// Key 0: IDTimestamp always 8 bytes
 	b = append(b, 0x00, CborBstrLen8)
 	b = append(b, g.IDTimestamp[:]...)
+	return appendGrantPayloadPairs(b, g)
+}
+
+// MarshalGrantPayload encodes g in the payload form: one map with keys 1–6
+// in order, Core Deterministic, with no idtimestamp. This is the form the
+// owner signs and the form the commitment covers; g.IDTimestamp is ignored.
+func MarshalGrantPayload(g *Grant) ([]byte, error) {
+	if g == nil {
+		return nil, fmt.Errorf("grant: MarshalGrantPayload: nil grant")
+	}
+	b := make([]byte, 0, 64)
+	b = append(b, 0xa0|cborPayloadMapPairs)
+	return appendGrantPayloadPairs(b, g)
+}
+
+// appendGrantPayloadPairs appends the key 1–6 pairs shared by both forms.
+func appendGrantPayloadPairs(b []byte, g *Grant) ([]byte, error) {
+	if err := CheckSizes(g.LogId, g.GrantFlags, g.OwnerLogId); err != nil {
+		return nil, err
+	}
 	// Key 1: LogId, fixed 32 bytes on wire (left-pad)
 	logId32, err := cborPadTo(g.LogId, CborFixedLogIdOwnerLogIdLen)
 	if err != nil {
@@ -96,12 +126,6 @@ func MarshalGrant(g *Grant) ([]byte, error) {
 	// Key 6: GrantData (variable)
 	b = append(b, 0x06)
 	b = appendCborBstr(b, g.GrantData)
-	// Key 7: Signer (variable)
-	b = append(b, 0x07)
-	b = appendCborBstr(b, g.Signer)
-	// Key 8: Kind
-	b = append(b, 0x08)
-	b = appendCborUint(b, uint64(g.Kind))
 	return b, nil
 }
 
@@ -121,8 +145,8 @@ func cborPadTo(s []byte, size int) ([]byte, error) {
 	return out, nil
 }
 
-// appendCborBstr appends a CBOR byte string for variable-length fields
-// (GrantData, Signer). No size check; used only where length is unbounded.
+// appendCborBstr appends a CBOR byte string for the variable-length
+// GrantData field. No size check; used only where length is unbounded.
 func appendCborBstr(b []byte, s []byte) []byte {
 	if s == nil {
 		s = []byte{}
@@ -167,8 +191,10 @@ func appendCborUint(b []byte, v uint64) []byte {
 	return append(b, buf[:]...)
 }
 
-// UnmarshalGrant decodes CBOR produced by MarshalGrant into g. g must be
-// non-nil. Enforces max sizes on byte-string fields. Returns an error on
+// UnmarshalGrant decodes either wire form into g: the response form (keys
+// 0–6) sets g.IDTimestamp; the payload form (keys 1–6) leaves it zero. g must
+// be non-nil. Enforces max sizes on byte-string fields. Returns
+// ErrGrantObsoleteKey if the map carries key 7 or 8, and an error on any other
 // malformed or unexpected structure.
 func UnmarshalGrant(data []byte, g *Grant) error {
 	if g == nil {
@@ -226,72 +252,109 @@ func (d *cborDecoder) decodeGrant(g *Grant) error {
 	if err != nil {
 		return err
 	}
-	if n != 9 {
-		return fmt.Errorf("grant: expected map of 9 pairs, got %d", n)
+	firstKey := CborKeyIDTimestamp
+	switch n {
+	case cborResponseMapPairs:
+	case cborPayloadMapPairs:
+		firstKey = CborKeyLogId
+	default:
+		// A wrong pair count is most likely the retired 9-pair form; name
+		// that error specifically when key 7 or 8 is present.
+		if err := d.scanForObsoleteKeys(n); err != nil {
+			return err
+		}
+		return fmt.Errorf("grant: expected map of %d (response form) or %d (payload form) pairs, got %d", cborResponseMapPairs, cborPayloadMapPairs, n)
 	}
-	// Decode 9 pairs in order; we accept only key 0,1,...,8 in sequence.
-	for key := 0; key < 9; key++ {
+	// Decode the pairs in order; keys must run firstKey..6 in sequence.
+	for key := firstKey; key <= CborKeyGrantData; key++ {
 		gotKey, err := d.decodeUint()
 		if err != nil {
 			return err
+		}
+		if gotKey == cborKeyObsoleteSigner || gotKey == cborKeyObsoleteKind {
+			return fmt.Errorf("grant: map key %d: %w", gotKey, ErrGrantObsoleteKey)
 		}
 		if gotKey != uint64(key) {
 			return fmt.Errorf("grant: expected map key %d, got %d", key, gotKey)
 		}
 		switch key {
-		case 0:
+		case CborKeyIDTimestamp:
 			raw, err := d.decodeBstr(IDTimestampBytes, true)
 			if err != nil {
 				return err
 			}
 			copy(g.IDTimestamp[:], raw)
-		case 1:
+		case CborKeyLogId:
 			g.LogId, err = d.decodeBstr(CborFixedLogIdOwnerLogIdLen, true)
 			if err != nil {
 				return err
 			}
-		case 2:
+		case CborKeyOwnerLogId:
 			g.OwnerLogId, err = d.decodeBstr(CborFixedLogIdOwnerLogIdLen, true)
 			if err != nil {
 				return err
 			}
-		case 3:
+		case CborKeyGrantFlags:
 			g.GrantFlags, err = d.decodeBstr(CborFixedGrantFlagsLen, true)
 			if err != nil {
 				return err
 			}
-		case 4:
+		case CborKeyMaxHeight:
 			g.MaxHeight, err = d.decodeUint()
 			if err != nil {
 				return err
 			}
-		case 5:
+		case CborKeyMinGrowth:
 			g.MinGrowth, err = d.decodeUint()
 			if err != nil {
 				return err
 			}
-		case 6:
+		case CborKeyGrantData:
 			g.GrantData, err = d.decodeBstr(CborMaxGrantData, false) // variable
 			if err != nil {
 				return err
 			}
-		case 7:
-			g.Signer, err = d.decodeBstr(CborMaxSigner, false) // variable
-			if err != nil {
-				return err
-			}
-		case 8:
-			k, err := d.decodeUint()
-			if err != nil {
-				return err
-			}
-			if k > 0xff {
-				return fmt.Errorf("grant: kind %d exceeds 255", k)
-			}
-			g.Kind = byte(k)
 		}
 	}
 	return nil
+}
+
+// scanForObsoleteKeys walks n pairs without interpreting the values and
+// returns ErrGrantObsoleteKey if any key is 7 or 8. Any structural error
+// during the walk is returned as-is; the caller reports the count mismatch
+// when the walk finds nothing.
+func (d *cborDecoder) scanForObsoleteKeys(n int) error {
+	scan := cborDecoder{data: d.data, off: d.off}
+	for i := 0; i < n; i++ {
+		key, err := scan.decodeUint()
+		if err != nil {
+			return nil
+		}
+		if key == cborKeyObsoleteSigner || key == cborKeyObsoleteKind {
+			return fmt.Errorf("grant: map key %d: %w", key, ErrGrantObsoleteKey)
+		}
+		if err := scan.skipValue(); err != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+// skipValue advances past one unsigned integer or byte string value.
+func (d *cborDecoder) skipValue() error {
+	if !d.need(1) {
+		return fmt.Errorf("grant: CBOR truncated at byte %d", d.off)
+	}
+	switch d.data[d.off] >> 5 {
+	case 0:
+		_, err := d.decodeUint()
+		return err
+	case 2:
+		_, err := d.decodeBstr(len(d.data), false)
+		return err
+	default:
+		return fmt.Errorf("grant: unsupported value major type %d", d.data[d.off]>>5)
+	}
 }
 
 func (d *cborDecoder) decodeAuxCount(aux byte) (int, error) {

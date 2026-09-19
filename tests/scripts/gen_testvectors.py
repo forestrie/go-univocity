@@ -5,8 +5,11 @@ Generate test vectors for leaf commitment and grant encoding.
 Output: tests/fixtures/leaf_vectors.json, tests/fixtures/grant_vectors.json
 Consumable by Go, TypeScript, and Python tests.
 
-Grant wire format (matches grant/cborcodec.go): CBOR map with integer keys 0-8
-in order. Keys 1,2,3 are fixed-length bstr (32, 32, 8 bytes); encode left-pads.
+Grant wire format (matches grant/cborcodec.go and forestrie/protocol
+spec/log-authority-and-grants.md section 2.1): CBOR map with integer keys 0-6
+in order (the response form; key 0 is the idtimestamp). Keys 1,2,3 are
+fixed-length bstr (32, 32, 8 bytes); encode left-pads. Keys 7 and 8 are
+retired and must not be emitted.
 Leaf formula (univocity): inner = logId(32)||grant(32)||maxHeight(8)||minGrowth(8)||ownerLogId(32)||grantData.
 leaf = sha256(grantIDTimestampBe || sha256(inner)).
 """
@@ -141,17 +144,15 @@ def marshal_grant_cbor(
     max_height: int,
     min_growth: int,
     grant_data: bytes,
-    signer: bytes,
-    kind: int,
 ) -> bytes:
-    """Encode grant to CBOR bytes matching Go MarshalGrant (keys 0-8, fixed 32/32/8)."""
+    """Encode grant to CBOR bytes matching Go MarshalGrant (keys 0-6, fixed 32/32/8)."""
     if len(id_timestamp) != 8:
         raise ValueError("id_timestamp must be 8 bytes")
     log32 = cbor_pad_to(log_id, CBOR_FIXED_LOG_ID_OWNER_LOG_ID_LEN)
     owner32 = cbor_pad_to(owner_log_id, CBOR_FIXED_LOG_ID_OWNER_LOG_ID_LEN)
     flags8 = cbor_pad_to(grant_flags, CBOR_FIXED_GRANT_FLAGS_LEN)
     b = bytearray()
-    b.append(0xA9)  # map with 9 pairs
+    b.append(0xA7)  # map with 7 pairs: keys 0-6
     b.extend((0x00, CBOR_BSTR_LEN_8))
     b.extend(id_timestamp)
     b.extend((0x01, CBOR_BSTR_LEN32_LEAD, CBOR_FIXED_LOG_ID_OWNER_LOG_ID_LEN))
@@ -166,10 +167,6 @@ def marshal_grant_cbor(
     append_cbor_uint(b, min_growth)
     b.append(0x06)
     append_cbor_bstr(b, grant_data)
-    b.append(0x07)
-    append_cbor_bstr(b, signer)
-    b.append(0x08)
-    append_cbor_uint(b, kind)
     return bytes(b)
 
 
@@ -263,7 +260,7 @@ def main() -> int:
     grant_flags = bytes(7) + b"\x01"
     golden_cbor = marshal_grant_cbor(
         id_ts, log_id, owner_log_id, grant_flags,
-        1000, 1, bytes([0xAB, 0xCD]), bytes([0x01, 0x02]), 1,
+        1000, 1, bytes([0xAB, 0xCD]),
     )
     grant_vectors.append({
         "description": "golden grant (all fields, fixed-length left-padded)",
@@ -274,22 +271,20 @@ def main() -> int:
         "max_height": 1000,
         "min_growth": 1,
         "grant_data_hex": "abcd",
-        "signer_hex": "0102",
-        "kind": 1,
         "expected_cbor_hex": golden_cbor.hex(),
     })
 
-    # Minimal grant: required fields only (zero bounds, minimal grantData/signer)
+    # Minimal grant: required fields only (zero bounds, empty grantData)
     id_ts_min = bytes(8)  # all zero
     log_min = bytes(range(4, 20))
     owner_min = bytes(range(5, 21))
     flags_min = bytes([0x01])  # 1 byte -> left-padded to 8
     minimal_cbor = marshal_grant_cbor(
         id_ts_min, log_min, owner_min, flags_min,
-        0, 0, b"", bytes([0x00]), 0,
+        0, 0, b"",
     )
     grant_vectors.append({
-        "description": "minimal grant (zero bounds, empty grantData, 1-byte signer)",
+        "description": "minimal grant (zero bounds, empty grantData)",
         "idtimestamp_hex": id_ts_min.hex(),
         "log_id_hex": log_min.hex(),
         "owner_log_id_hex": owner_min.hex(),
@@ -297,8 +292,6 @@ def main() -> int:
         "max_height": 0,
         "min_growth": 0,
         "grant_data_hex": "",
-        "signer_hex": "00",
-        "kind": 0,
         "expected_cbor_hex": minimal_cbor.hex(),
     })
 
@@ -309,7 +302,7 @@ def main() -> int:
     flags_f = bytes([0xFF])  # single byte
     fixed_cbor = marshal_grant_cbor(
         id_ts_f, log_f, owner_f, flags_f,
-        0, 0, bytes([0x01]), bytes([0x02, 0x03]), 1,
+        0, 0, bytes([0x01]),
     )
     grant_vectors.append({
         "description": "fixed-length padding (16-byte logId/ownerLogId -> 32, 1-byte flags -> 8)",
@@ -320,19 +313,17 @@ def main() -> int:
         "max_height": 0,
         "min_growth": 0,
         "grant_data_hex": "01",
-        "signer_hex": "0203",
-        "kind": 1,
         "expected_cbor_hex": fixed_cbor.hex(),
     })
 
-    # Variable-length: empty grantData, short signer
+    # Variable-length: empty grantData, non-trivial bounds
     id_ts_v = bytes(7) + b"\x03"
     variable_cbor = marshal_grant_cbor(
         id_ts_v, log_id, owner_log_id, grant_flags,
-        99, 10, b"", bytes([0xEE]), 0,
+        99, 10, b"",
     )
     grant_vectors.append({
-        "description": "variable-length (empty grantData, 1-byte signer)",
+        "description": "variable-length (empty grantData)",
         "idtimestamp_hex": id_ts_v.hex(),
         "log_id_hex": log_id.hex(),
         "owner_log_id_hex": owner_log_id.hex(),
@@ -340,8 +331,6 @@ def main() -> int:
         "max_height": 99,
         "min_growth": 10,
         "grant_data_hex": "",
-        "signer_hex": "ee",
-        "kind": 0,
         "expected_cbor_hex": variable_cbor.hex(),
     })
 

@@ -44,8 +44,6 @@ func TestLeafCommitmentFromGrant(t *testing.T) {
 		MaxHeight:   2000,
 		MinGrowth:   2,
 		GrantData:   []byte{0xde, 0xad},
-		Signer:      []byte{0x01, 0x02}, // not in commitment
-		Kind:        0,
 	}
 	for i := range g.LogId {
 		g.LogId[i] = byte(i)
