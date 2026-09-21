@@ -12,9 +12,21 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-// grantWire matches the CBOR map shape (keyasint 0-8) for verification with
-// fxamacker/cbor in tests only.
+// grantWire matches the response-form CBOR map shape (keyasint 0-6) for
+// verification with fxamacker/cbor in tests only.
 type grantWire struct {
+	IDTimestamp []byte `cbor:"0,keyasint"`
+	LogId       []byte `cbor:"1,keyasint"`
+	OwnerLogId  []byte `cbor:"2,keyasint"`
+	GrantFlags  []byte `cbor:"3,keyasint"`
+	MaxHeight   uint64 `cbor:"4,keyasint"`
+	MinGrowth   uint64 `cbor:"5,keyasint"`
+	GrantData   []byte `cbor:"6,keyasint"`
+}
+
+// grantWireLegacy is the retired 9-pair shape (keys 7 signer, 8 kind) that
+// UnmarshalGrant must refuse.
+type grantWireLegacy struct {
 	IDTimestamp []byte `cbor:"0,keyasint"`
 	LogId       []byte `cbor:"1,keyasint"`
 	OwnerLogId  []byte `cbor:"2,keyasint"`
@@ -35,8 +47,6 @@ func TestMarshalGrant_UnmarshalGrant_RoundTrip(t *testing.T) {
 		MaxHeight:   1000,
 		MinGrowth:   1,
 		GrantData:   []byte{0xab, 0xcd},
-		Signer:      []byte{0x01, 0x02},
-		Kind:        1,
 	}
 	data, err := MarshalGrant(g)
 	if err != nil {
@@ -70,12 +80,6 @@ func TestMarshalGrant_UnmarshalGrant_RoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(dec.GrantData, g.GrantData) {
 		t.Errorf("GrantData: got %x, want %x", dec.GrantData, g.GrantData)
-	}
-	if !bytes.Equal(dec.Signer, g.Signer) {
-		t.Errorf("Signer: got %x, want %x", dec.Signer, g.Signer)
-	}
-	if dec.Kind != g.Kind {
-		t.Errorf("Kind: got %d, want %d", dec.Kind, g.Kind)
 	}
 	// Second round-trip: encoded bytes should be identical (deterministic).
 	data2, err := MarshalGrant(&dec)
@@ -158,7 +162,7 @@ func TestMarshalGrant_EmptyGrant(t *testing.T) {
 	if dec.IDTimestamp != [IDTimestampBytes]byte{} {
 		t.Errorf("empty grant IDTimestamp should decode to zero")
 	}
-	if dec.MaxHeight != 0 || dec.MinGrowth != 0 || dec.Kind != 0 {
+	if dec.MaxHeight != 0 || dec.MinGrowth != 0 {
 		t.Errorf("empty grant numeric fields should decode to zero")
 	}
 }
@@ -174,8 +178,6 @@ func TestMarshalGrant_ValidCBOR(t *testing.T) {
 		MaxHeight:   1000,
 		MinGrowth:   1,
 		GrantData:   []byte{0xab, 0xcd},
-		Signer:      []byte{0x01, 0x02},
-		Kind:        1,
 	}
 	data, err := MarshalGrant(g)
 	if err != nil {
@@ -195,8 +197,8 @@ func TestMarshalGrant_ValidCBOR(t *testing.T) {
 	if !bytes.Equal(w.LogId, wantLogId) || !bytes.Equal(w.OwnerLogId, wantOwner) || !bytes.Equal(w.GrantFlags, wantFlags) {
 		t.Error("LogId, OwnerLogId, or GrantFlags mismatch after library decode (expected fixed-length padded)")
 	}
-	if w.MaxHeight != g.MaxHeight || w.MinGrowth != g.MinGrowth || w.Kind != g.Kind {
-		t.Errorf("MaxHeight=%d MinGrowth=%d Kind=%d, want %d %d %d", w.MaxHeight, w.MinGrowth, w.Kind, g.MaxHeight, g.MinGrowth, g.Kind)
+	if w.MaxHeight != g.MaxHeight || w.MinGrowth != g.MinGrowth {
+		t.Errorf("MaxHeight=%d MinGrowth=%d, want %d %d", w.MaxHeight, w.MinGrowth, g.MaxHeight, g.MinGrowth)
 	}
 }
 
@@ -217,8 +219,6 @@ func TestUnmarshalGrant_FromLibrary(t *testing.T) {
 		MaxHeight:   2000,
 		MinGrowth:   2,
 		GrantData:   []byte{0xde, 0xad},
-		Signer:      []byte{0x03},
-		Kind:        2,
 	}
 	data, err := cbor.Marshal(w)
 	if err != nil {
@@ -234,8 +234,79 @@ func TestUnmarshalGrant_FromLibrary(t *testing.T) {
 	if !bytes.Equal(g.LogId, w.LogId) || !bytes.Equal(g.GrantData, w.GrantData) {
 		t.Error("LogId or GrantData mismatch")
 	}
-	if g.MaxHeight != w.MaxHeight || g.MinGrowth != w.MinGrowth || g.Kind != w.Kind {
-		t.Errorf("MaxHeight=%d MinGrowth=%d Kind=%d", g.MaxHeight, g.MinGrowth, g.Kind)
+	if g.MaxHeight != w.MaxHeight || g.MinGrowth != w.MinGrowth {
+		t.Errorf("MaxHeight=%d MinGrowth=%d", g.MaxHeight, g.MinGrowth)
+	}
+}
+
+// TestUnmarshalGrant_RejectsLegacyKeys7And8 verifies the retired 9-pair
+// shape is refused with ErrGrantObsoleteKey rather than decoded.
+func TestUnmarshalGrant_RejectsLegacyKeys7And8(t *testing.T) {
+	w := grantWireLegacy{
+		IDTimestamp: []byte{0, 0, 0, 0, 0, 0, 0, 1},
+		LogId:       make([]byte, CborFixedLogIdOwnerLogIdLen),
+		OwnerLogId:  make([]byte, CborFixedLogIdOwnerLogIdLen),
+		GrantFlags:  make([]byte, CborFixedGrantFlagsLen),
+		GrantData:   []byte{0xab},
+		Signer:      []byte{0x01},
+		Kind:        1,
+	}
+	data, err := cbor.Marshal(w)
+	if err != nil {
+		t.Fatalf("cbor.Marshal: %v", err)
+	}
+	var g Grant
+	err = UnmarshalGrant(data, &g)
+	if err == nil {
+		t.Fatal("UnmarshalGrant(legacy keys 7/8): want error")
+	}
+	if !errors.Is(err, ErrGrantObsoleteKey) {
+		t.Errorf("want ErrGrantObsoleteKey, got %v", err)
+	}
+}
+
+// TestMarshalGrantPayload_RoundTrip verifies the payload form (keys 1-6, no
+// idtimestamp) encodes as a 6-pair map and decodes with a zero IDTimestamp.
+func TestMarshalGrantPayload_RoundTrip(t *testing.T) {
+	g := &Grant{
+		IDTimestamp: [IDTimestampBytes]byte{0, 0, 0, 0, 0, 0, 0, 9},
+		LogId:       bytes.Repeat([]byte{0xaa}, LogIDBytes),
+		OwnerLogId:  bytes.Repeat([]byte{0xbb}, LogIDBytes),
+		GrantFlags:  []byte{0x01},
+		MaxHeight:   99,
+		MinGrowth:   10,
+		GrantData:   []byte{0xee},
+	}
+	payload, err := MarshalGrantPayload(g)
+	if err != nil {
+		t.Fatalf("MarshalGrantPayload: %v", err)
+	}
+	if payload[0] != 0xa6 {
+		t.Fatalf("payload form must be a 6-pair map, got lead byte %#x", payload[0])
+	}
+	response, err := MarshalGrant(g)
+	if err != nil {
+		t.Fatalf("MarshalGrant: %v", err)
+	}
+	// The response form is the payload form with key 0 prepended.
+	if !bytes.Equal(response[1+2+IDTimestampBytes:], payload[1:]) {
+		t.Error("response form must equal payload form after the key-0 pair")
+	}
+	var dec Grant
+	if err := UnmarshalGrant(payload, &dec); err != nil {
+		t.Fatalf("UnmarshalGrant(payload form): %v", err)
+	}
+	if dec.IDTimestamp != [IDTimestampBytes]byte{} {
+		t.Errorf("payload form must decode with a zero IDTimestamp, got %x", dec.IDTimestamp[:])
+	}
+	if !bytes.Equal(dec.LogId, leftPad32(g.LogId)) || !bytes.Equal(dec.GrantFlags, leftPad8(g.GrantFlags)) || !bytes.Equal(dec.GrantData, g.GrantData) {
+		t.Error("payload form fields mismatch after decode")
+	}
+	if dec.MaxHeight != g.MaxHeight || dec.MinGrowth != g.MinGrowth {
+		t.Errorf("MaxHeight=%d MinGrowth=%d, want %d %d", dec.MaxHeight, dec.MinGrowth, g.MaxHeight, g.MinGrowth)
+	}
+	if LeafCommitmentFromGrant(&dec) == LeafCommitmentFromGrant(g) {
+		t.Error("leaf commitments should differ because the payload form carries no idtimestamp")
 	}
 }
 
@@ -313,43 +384,72 @@ type grantVector struct {
 	MaxHeight       uint64 `json:"max_height"`
 	MinGrowth       uint64 `json:"min_growth"`
 	GrantDataHex    string `json:"grant_data_hex"`
-	SignerHex       string `json:"signer_hex"`
-	Kind            byte   `json:"kind"`
 	ExpectedCBORHex string `json:"expected_cbor_hex"`
 }
 
-// TestGrantVectorsFromFixture loads tests/fixtures/grant_vectors.json and
-// asserts decode(golden_cbor) round-trips and re-encode equals golden bytes.
-func TestGrantVectorsFromFixture(t *testing.T) {
-	candidates := []string{
-		filepath.Join("tests", "fixtures", "grant_vectors.json"),
-		filepath.Join("..", "tests", "fixtures", "grant_vectors.json"),
-	}
-	var data []byte
-	var err error
-	for _, path := range candidates {
-		data, err = os.ReadFile(path)
-		if err == nil {
-			break
+// grantNegativeVector is one entry from tests/fixtures/grant_vectors_negative.json.
+type grantNegativeVector struct {
+	Description  string `json:"description"`
+	CBORHex      string `json:"cbor_hex"`
+	MustReject   bool   `json:"must_reject"`
+	Reason       string `json:"reason"`
+	ObsoleteKeys []int  `json:"obsolete_keys"`
+}
+
+func readFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	for _, path := range []string{
+		filepath.Join("tests", "fixtures", name),
+		filepath.Join("..", "tests", "fixtures", name),
+	} {
+		if data, err := os.ReadFile(path); err == nil {
+			return data
 		}
 	}
-	if data == nil {
-		t.Skipf("fixture not found (run tests/scripts/gen_testvectors.py): %v", err)
-		return
-	}
+	t.Skipf("fixture %s not found (copy from forestrie/protocol vectors/fixtures/)", name)
+	return nil
+}
+
+// TestGrantVectorsFromFixture loads tests/fixtures/grant_vectors.json (the
+// forestrie/protocol conformance vectors) and asserts that decode(golden_cbor)
+// yields the entry's fields and that re-encode equals the golden bytes.
+func TestGrantVectorsFromFixture(t *testing.T) {
+	data := readFixture(t, "grant_vectors.json")
 	var vectors []grantVector
 	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatalf("parse fixture: %v", err)
 	}
+	if len(vectors) == 0 {
+		t.Fatal("fixture has no vectors")
+	}
+	mustHex := func(s string) []byte {
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			t.Fatalf("invalid hex %q: %v", s, err)
+		}
+		return b
+	}
 	for i, v := range vectors {
 		t.Run(v.Description, func(t *testing.T) {
-			cborBytes, err := hex.DecodeString(v.ExpectedCBORHex)
-			if err != nil {
-				t.Fatalf("vector %d: invalid expected_cbor_hex: %v", i, err)
-			}
+			cborBytes := mustHex(v.ExpectedCBORHex)
 			var dec Grant
 			if err := UnmarshalGrant(cborBytes, &dec); err != nil {
 				t.Fatalf("vector %d: UnmarshalGrant: %v", i, err)
+			}
+			if !bytes.Equal(dec.IDTimestamp[:], mustHex(v.IDTimestampHex)) {
+				t.Errorf("vector %d: IDTimestamp %x, want %s", i, dec.IDTimestamp[:], v.IDTimestampHex)
+			}
+			if !bytes.Equal(dec.LogId, leftPad32(mustHex(v.LogIDHex))) || !bytes.Equal(dec.OwnerLogId, leftPad32(mustHex(v.OwnerLogIDHex))) {
+				t.Errorf("vector %d: LogId/OwnerLogId mismatch", i)
+			}
+			if !bytes.Equal(dec.GrantFlags, leftPad8(mustHex(v.GrantFlagsHex))) {
+				t.Errorf("vector %d: GrantFlags %x, want %s left-padded", i, dec.GrantFlags, v.GrantFlagsHex)
+			}
+			if dec.MaxHeight != v.MaxHeight || dec.MinGrowth != v.MinGrowth {
+				t.Errorf("vector %d: MaxHeight=%d MinGrowth=%d, want %d %d", i, dec.MaxHeight, dec.MinGrowth, v.MaxHeight, v.MinGrowth)
+			}
+			if !bytes.Equal(dec.GrantData, mustHex(v.GrantDataHex)) {
+				t.Errorf("vector %d: GrantData %x, want %s", i, dec.GrantData, v.GrantDataHex)
 			}
 			reencoded, err := MarshalGrant(&dec)
 			if err != nil {
@@ -359,6 +459,39 @@ func TestGrantVectorsFromFixture(t *testing.T) {
 				t.Errorf("vector %d: re-encode != golden CBOR (decode then encode must be byte-identical)", i)
 				t.Logf("got  %s", hex.EncodeToString(reencoded))
 				t.Logf("want %s", v.ExpectedCBORHex)
+			}
+		})
+	}
+}
+
+// TestGrantNegativeVectorsFromFixture loads tests/fixtures/grant_vectors_negative.json
+// and asserts every entry is refused; entries whose reason is obsolete_key
+// must fail with ErrGrantObsoleteKey.
+func TestGrantNegativeVectorsFromFixture(t *testing.T) {
+	data := readFixture(t, "grant_vectors_negative.json")
+	var vectors []grantNegativeVector
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	if len(vectors) == 0 {
+		t.Fatal("fixture has no vectors")
+	}
+	for i, v := range vectors {
+		t.Run(v.Description, func(t *testing.T) {
+			if !v.MustReject {
+				t.Fatalf("vector %d: must_reject is not true", i)
+			}
+			cborBytes, err := hex.DecodeString(v.CBORHex)
+			if err != nil {
+				t.Fatalf("vector %d: invalid cbor_hex: %v", i, err)
+			}
+			var dec Grant
+			err = UnmarshalGrant(cborBytes, &dec)
+			if err == nil {
+				t.Fatalf("vector %d: UnmarshalGrant accepted bytes that must be rejected", i)
+			}
+			if v.Reason == "obsolete_key" && !errors.Is(err, ErrGrantObsoleteKey) {
+				t.Errorf("vector %d: want ErrGrantObsoleteKey, got %v", i, err)
 			}
 		})
 	}
